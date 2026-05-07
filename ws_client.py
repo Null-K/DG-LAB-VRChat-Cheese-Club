@@ -369,6 +369,11 @@ class WSClient:
     def send_waveform(self, channel: str, hex_data, duration: int = 5):
         if not self.is_paired:
             return
+        if isinstance(hex_data, str):
+            try:
+                hex_data = json.loads(hex_data)
+            except (json.JSONDecodeError, ValueError):
+                return
         if not isinstance(hex_data, list) or not hex_data:
             return
         # pydglab_ws limit: max 86 entries per message, max 1950 chars

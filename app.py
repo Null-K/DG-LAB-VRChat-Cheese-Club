@@ -379,7 +379,7 @@ class App:
             params = {address: args[0] if len(args) == 1 else args}
             self._window.after(0, lambda p=params: self._window.osc_panel.update_params(p))
 
-    def _on_avatar_wave(self, channel: str, wave_hex: str):
+    def _on_avatar_wave(self, channel: str, wave_hex):
         if self._ws_client and self._ws_client.is_paired:
             self._ws_client.send_waveform(channel, wave_hex)
 

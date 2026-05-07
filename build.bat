@@ -26,6 +26,7 @@ pyinstaller ^
     --add-data "settings.py;." ^
     --hidden-import qrcode ^
     --hidden-import PIL ^
+    --hidden-import numpy ^
     --hidden-import websockets ^
     --hidden-import websockets.legacy ^
     --hidden-import websockets.legacy.client ^
