@@ -327,6 +327,9 @@ class App:
             self._osc_server = osc_server.ThreadingOSCUDPServer(
                 ("127.0.0.1", avatar_port), d
             )
+            self._osc_server.socket.setsockopt(
+                __import__("socket").SOL_SOCKET, __import__("socket").SO_REUSEADDR, 1
+            )
             threading.Thread(target=self._osc_server.serve_forever, daemon=True).start()
             self._log_to_console(f"Avatar OSC 已连接 (端口:{avatar_port})", "info")
         except Exception as e:
@@ -340,6 +343,7 @@ class App:
         if self._osc_server:
             try:
                 self._osc_server.shutdown()
+                self._osc_server.server_close()
             except Exception:
                 pass
             self._osc_server = None
