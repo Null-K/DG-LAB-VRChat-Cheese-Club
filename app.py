@@ -7,6 +7,7 @@ from ws_client import WSClient
 from waveform import generate_ab_waveforms, waveform_to_display_data
 from avatar_handler import AvatarManager
 from gui.main_window import MainWindow
+from http_server import HttpServer
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class App:
         self._shock_recent_events = []  # [(timestamp, seconds), ...] for 1s window safety
         self._waveform_name_a = ""
         self._waveform_name_b = ""
+        self._http_server = HttpServer(port=self._settings.get("http_port", 9002))
 
     def run(self):
         theme = get_theme(self._current_theme_name)
@@ -39,6 +41,9 @@ class App:
         self._window.after(500, self._auto_connect)
         # Register chatbox toggle callback
         self._window.osc_panel.set_on_chatbox_toggle(self._on_chatbox_toggle)
+        # Start HTTP server for VRChat ShockingManager compatibility
+        if self._http_server.start(self):
+            self._log_to_console(f"HTTP 服务已启动 (端口:{self._settings.get('http_port', 9002)})", "info")
         self._window.run()
 
     def _auto_connect(self):
@@ -403,6 +408,76 @@ class App:
         self._log_to_console(f"测试电击: 3秒双通道 A:{a_limit} B:{b_limit}", "shock")
         self._send_chatbox(f"[测试] 3秒双通道 | A:{a_limit} B:{b_limit}")
 
+    def on_http_shock(self, mode: int, seconds: int):
+        """Handle shock trigger from VRChat ShockingManager HTTP request."""
+        if not self._ws_client or not self._ws_client.is_paired:
+            return
+        a_limit = self._window.settings_panel.get_a_limit()
+        b_limit = self._window.settings_panel.get_b_limit()
+        ui_mode = self._window.settings_panel.get_mode()
+        wf_mode = self._window.settings_panel.get_waveform_mode()
+
+        # Accumulate remaining time
+        import time as _time
+        now = _time.time()
+        self._shock_recent_events.append((now, seconds))
+        self._shock_recent_events = [(t, s) for t, s in self._shock_recent_events if now - t <= 1.0]
+        recent_sum = sum(s for _, s in self._shock_recent_events)
+        if recent_sum > 10:
+            allowed = max(0, 10 - (recent_sum - seconds))
+            seconds = allowed
+            self._shock_recent_events[-1] = (now, seconds)
+        if seconds <= 0:
+            return
+        if now < self._shock_end_time:
+            self._shock_remaining_a += seconds
+            self._shock_remaining_b += seconds
+        else:
+            self._shock_remaining_a = seconds
+            self._shock_remaining_b = seconds
+        self._shock_end_time = now + self._shock_remaining_a
+
+        mapping = self._settings.get("seconds_mapping", {})
+        base_intensity = mapping.get(str(seconds), seconds * 20)
+        a_intensity = min(base_intensity, a_limit)
+        b_intensity = min(base_intensity, b_limit)
+
+        # Determine which channels to send
+        if mode == 0:  # A only
+            a_wave, _, a_name, _ = generate_ab_waveforms(
+                seconds, a_intensity, 0, ui_mode, wf_mode, alternate=False,
+            )
+            self._waveform_name_a = a_name
+            self._waveform_name_b = ""
+            self._ws_client.clear_waveform("A")
+            self._ws_client.send_waveform("A", a_wave, duration=seconds)
+        elif mode == 1:  # B only
+            b_wave, _, _, b_name = generate_ab_waveforms(
+                seconds, 0, b_intensity, ui_mode, wf_mode, alternate=False,
+            )
+            self._waveform_name_a = ""
+            self._waveform_name_b = b_name
+            self._ws_client.clear_waveform("B")
+            self._ws_client.send_waveform("B", b_wave, duration=seconds)
+        else:  # AB both
+            a_wave, b_wave, a_name, b_name = generate_ab_waveforms(
+                seconds, a_intensity, b_intensity, ui_mode, wf_mode, alternate=True,
+            )
+            self._waveform_name_a = a_name
+            self._waveform_name_b = b_name
+            self._ws_client.clear_waveform("A")
+            self._ws_client.clear_waveform("B")
+            self._ws_client.send_waveform("A", a_wave, duration=seconds)
+            self._ws_client.send_waveform("B", b_wave, duration=seconds)
+
+        self._ws_client.force_strength(a_limit, b_limit)
+        self._log_to_console(
+            f"HTTP电击: {seconds}秒 | mode={mode} | "
+            f"A:{a_intensity} B:{b_intensity} | "
+            f"{'一键开火' if ui_mode == 'instant' else '温柔加力'}",
+            "shock",
+        )
+
     def _load_settings_to_ui(self):
         s = self._settings
         self._window.connection_panel.set_port(s.get("port", 9999))
@@ -442,6 +517,9 @@ class App:
     def on_close(self):
         # Stop all services in order
         self._chatbox_running = False
+        if self._http_server:
+            self._http_server.stop()
+            self._http_server = None
         if self._log_monitor:
             self._log_monitor.stop()
             self._log_monitor = None

@@ -22,6 +22,7 @@ DEFAULT_SETTINGS = {
     "chatbox_send_interval": 3,
     "chatbox_enabled": True,
     "custom_chatbox": "我是Saob",
+    "http_port": 9002,
     # Avatar OSC settings (compatible with Shocking-VRChat)
     "avatar_osc_port": 9001,
     "avatar_osc_host": "127.0.0.1",

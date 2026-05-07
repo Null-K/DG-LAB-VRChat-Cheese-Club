@@ -108,9 +108,11 @@ build.bat
 | matplotlib | 波形预览 |
 | qrcode + Pillow | 二维码生成 |
 
-### 协议
+### 协议与参考
 
-基于 [DG-LAB SOCKET v2 协议](https://github.com/DGLab-Project/DG-LAB-SOCKET-v2)，与 DG-LAB 官方 APP 兼容。
+- [DG-LAB SOCKET v2 协议](https://github.com/DGLab-Project/DG-LAB-SOCKET-v2) — 与 DG-LAB 官方 APP 兼容
+- [Shocking-VRChat](https://github.com/VRChatNext/Shocking-VRChat) — HTTP 接口参考（状态检测、电击触发）
+- Udon 脚本参考：Ero小玉 / Cheese
 
 ### 许可
 
