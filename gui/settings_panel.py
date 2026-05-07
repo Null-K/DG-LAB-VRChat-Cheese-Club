@@ -233,25 +233,6 @@ class SettingsPanel(tk.Frame):
         self._custom_text.pack(fill="x", pady=(2, 0))
         self._custom_text.bind("<FocusOut>", lambda e: self._on_change())
 
-        # Master chatbox toggle
-        master_cb_frame = tk.Frame(self, bg=t.get("bg_panel", "#1a1a2e"))
-        master_cb_frame.pack(fill="x", padx=8, pady=(6, 2))
-
-        self._chatbox_enabled_var = tk.BooleanVar(value=True)
-        self._chatbox_enabled_cb = tk.Checkbutton(
-            master_cb_frame, text="启用Chatbox显示",
-            variable=self._chatbox_enabled_var,
-            bg=t.get("bg_panel", "#1a1a2e"),
-            fg=t.get("accent_cyan", "#39d2c0"),
-            selectcolor=t.get("bg_button", "#0f3460"),
-            activebackground=t.get("bg_panel", "#1a1a2e"),
-            activeforeground=t.get("accent_cyan", "#39d2c0"),
-            font=("Microsoft YaHei UI", 9, "bold"),
-            command=self._on_chatbox_enabled_change,
-        )
-        self._chatbox_enabled_cb.pack(side="left")
-        self._on_chatbox_enabled_callback = None
-
         # Chatbox line toggles
         toggle_frame = tk.Frame(self, bg=t.get("bg_panel", "#1a1a2e"))
         toggle_frame.pack(fill="x", padx=8, pady=(6, 2))
@@ -262,12 +243,28 @@ class SettingsPanel(tk.Frame):
             font=("Microsoft YaHei UI", 9),
         ).pack(anchor="w")
 
+        self._on_chatbox_enabled_callback = None
+
+        self._cb_all_var = tk.BooleanVar(value=True)
         self._cb_line1_var = tk.BooleanVar(value=True)
         self._cb_line2_var = tk.BooleanVar(value=True)
         self._cb_line3_var = tk.BooleanVar(value=True)
         self._cb_line4_var = tk.BooleanVar(value=True)
         self._cb_line5_var = tk.BooleanVar(value=True)
 
+        self._cb_all = tk.Checkbutton(
+            toggle_frame, text="全部", variable=self._cb_all_var,
+            bg=t.get("bg_panel", "#1a1a2e"),
+            fg=t.get("accent_cyan", "#39d2c0"),
+            selectcolor=t.get("bg_button", "#0f3460"),
+            activebackground=t.get("bg_panel", "#1a1a2e"),
+            activeforeground=t.get("accent_cyan", "#39d2c0"),
+            font=("Microsoft YaHei UI", 8, "bold"),
+            command=self._on_all_toggle,
+        )
+        self._cb_all.pack(side="left", padx=(0, 6))
+
+        self._line_checkbuttons = []
         toggles = [
             (self._cb_line1_var, "标题行"),
             (self._cb_line2_var, "强度行"),
@@ -287,6 +284,7 @@ class SettingsPanel(tk.Frame):
                 command=self._on_change,
             )
             cb.pack(side="left", padx=(0, 4))
+            self._line_checkbuttons.append(cb)
 
     def _on_a_limit_change(self, value):
         val = int(float(value))
@@ -347,17 +345,25 @@ class SettingsPanel(tk.Frame):
         self._custom_text.insert("1.0", text)
 
     def get_chatbox_enabled(self) -> bool:
-        return self._chatbox_enabled_var.get()
+        return self._cb_all_var.get()
 
     def set_chatbox_enabled(self, enabled: bool):
-        self._chatbox_enabled_var.set(enabled)
+        self._cb_all_var.set(enabled)
+        self._update_line_states()
 
     def set_on_chatbox_enabled(self, callback):
         self._on_chatbox_enabled_callback = callback
 
-    def _on_chatbox_enabled_change(self):
+    def _on_all_toggle(self):
+        enabled = self._cb_all_var.get()
+        self._update_line_states()
         if self._on_chatbox_enabled_callback:
-            self._on_chatbox_enabled_callback(self._chatbox_enabled_var.get())
+            self._on_chatbox_enabled_callback(enabled)
+
+    def _update_line_states(self):
+        state = "normal" if self._cb_all_var.get() else "disabled"
+        for cb in self._line_checkbuttons:
+            cb.configure(state=state)
 
     def get_chatbox_toggles(self) -> dict:
         return {
