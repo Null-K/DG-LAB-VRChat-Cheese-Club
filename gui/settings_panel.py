@@ -219,9 +219,8 @@ class SettingsPanel(tk.Frame):
             font=("Microsoft YaHei UI", 9),
         ).pack(anchor="w")
 
-        self._custom_var = tk.StringVar(value="我是Saob")
-        self._custom_entry = tk.Entry(
-            custom_frame, textvariable=self._custom_var,
+        self._custom_text = tk.Text(
+            custom_frame, height=3, wrap="word",
             bg=t.get("bg_input", "#0d1117"),
             fg=t.get("text_primary", "#e6edf3"),
             insertbackground=t.get("text_primary", "#e6edf3"),
@@ -230,9 +229,9 @@ class SettingsPanel(tk.Frame):
             highlightbackground=t.get("border_color", "#30363d"),
             highlightcolor=t.get("accent_cyan", "#39d2c0"),
         )
-        self._custom_entry.pack(fill="x", pady=(2, 0))
-        self._custom_entry.bind("<FocusOut>", lambda e: self._on_change())
-        self._custom_entry.bind("<Return>", lambda e: self._on_change())
+        self._custom_text.insert("1.0", "我是Saob")
+        self._custom_text.pack(fill="x", pady=(2, 0))
+        self._custom_text.bind("<FocusOut>", lambda e: self._on_change())
 
         # Chatbox line toggles
         toggle_frame = tk.Frame(self, bg=t.get("bg_panel", "#1a1a2e"))
@@ -322,10 +321,11 @@ class SettingsPanel(tk.Frame):
         self._wf_var.set(mode)
 
     def get_custom_chatbox(self) -> str:
-        return self._custom_var.get().strip()
+        return self._custom_text.get("1.0", "end-1c").strip()
 
     def set_custom_chatbox(self, text: str):
-        self._custom_var.set(text)
+        self._custom_text.delete("1.0", "end")
+        self._custom_text.insert("1.0", text)
 
     def get_chatbox_toggles(self) -> dict:
         return {
