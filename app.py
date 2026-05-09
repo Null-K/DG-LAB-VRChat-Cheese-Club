@@ -714,14 +714,5 @@ class App:
 
             self._save_settings_from_ui()
             log.info("settings saved")
-
-            if self._window:
-                root = self._window._root
-                self._window = None
-                try:
-                    root.destroy()
-                except Exception:
-                    pass
-                log.info("window destroyed")
         except Exception as e:
             log.error(f"on_close error: {e}")

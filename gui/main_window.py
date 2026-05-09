@@ -144,10 +144,17 @@ class MainWindow:
     def run(self):
         def _on_close():
             self._app.on_close()
-            import os
-            os._exit(0)
+            try:
+                self._root.quit()
+            except Exception:
+                pass
         self._root.protocol("WM_DELETE_WINDOW", _on_close)
         self._root.mainloop()
+        # mainloop exited, now destroy
+        try:
+            self._root.destroy()
+        except Exception:
+            pass
 
     def destroy(self):
         self._root.destroy()

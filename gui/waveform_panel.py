@@ -103,25 +103,23 @@ class WaveformPanel(tk.Frame):
 
     def _tick(self):
         """Sample strength values and render."""
-        if self._get_a_value and self._get_b_value:
-            try:
-                a_val = self._get_a_value()
-                b_val = self._get_b_value()
-            except Exception:
-                a_val, b_val = 0, 0
-            now = time.time()
-            # Only record when there's actual strength
-            if a_val > 0 or b_val > 0:
-                self._history.append((now, a_val, b_val))
-            elif self._history:
-                # Once idle, stop adding points but keep last known state
-                last_ts, last_a, last_b = self._history[-1]
-                if last_a > 0 or last_b > 0:
-                    # Transition to idle: add one zero point to show the drop
-                    self._history.append((now, 0, 0))
-            self._render()
-            self._update_info(a_val, b_val)
-
+        if not self._get_a_value or not self._get_b_value:
+            return
+        try:
+            a_val = self._get_a_value()
+            b_val = self._get_b_value()
+        except Exception:
+            a_val, b_val = 0, 0
+        now = time.time()
+        # Only record when there's actual strength
+        if a_val > 0 or b_val > 0:
+            self._history.append((now, a_val, b_val))
+        elif self._history:
+            last_ts, last_a, last_b = self._history[-1]
+            if last_a > 0 or last_b > 0:
+                self._history.append((now, 0, 0))
+        self._render()
+        self._update_info(a_val, b_val)
         self._tick_id = self.after(500, self._tick)
 
     def _render(self):
