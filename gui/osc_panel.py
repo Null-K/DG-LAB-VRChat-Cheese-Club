@@ -67,13 +67,11 @@ class OSCPanel(tk.Frame):
         ).pack(side="left")
 
         self._avatar_port_var = tk.StringVar(value="9001")
-        self._avatar_port_entry = tk.Entry(
-            avt_frame, textvariable=self._avatar_port_var,
-            bg=t.get("bg_input", "#0a0a1a"), fg=t.get("text_primary", "#e0e0e0"),
-            insertbackground=t.get("text_primary", "#e0e0e0"),
-            font=("Consolas", 9), relief="flat", width=6,
-        )
-        self._avatar_port_entry.pack(side="left", padx=(4, 0))
+        tk.Label(
+            avt_frame, text="9001", bg=t.get("bg_panel", "#1a1a2e"),
+            fg=t.get("accent_orange", "#ffb74d"),
+            font=("Consolas", 9), width=6, anchor="w",
+        ).pack(side="left", padx=(4, 0))
 
         # Mode selection (A/B)
         mode_frame = tk.Frame(self, bg=t.get("bg_panel", "#1a1a2e"))
@@ -209,21 +207,20 @@ class OSCPanel(tk.Frame):
 
     def get_chatbox_port(self) -> int:
         try:
-            return int(self._chatbox_port_var.get().strip())
+            val = int(self._chatbox_port_var.get().strip())
+            return max(1, min(65535, val))
         except ValueError:
             return 9000
 
     def set_chatbox_port(self, port: int):
+        port = max(1, min(65535, int(port)))
         self._chatbox_port_var.set(str(port))
 
     def get_avatar_port(self) -> int:
-        try:
-            return int(self._avatar_port_var.get().strip())
-        except ValueError:
-            return 9001
+        return 9001
 
     def set_avatar_port(self, port: int):
-        self._avatar_port_var.set(str(port))
+        pass
 
     def get_mode_a(self) -> str:
         return self._mode_a_var.get()
