@@ -69,8 +69,8 @@ class OSCPanel(tk.Frame):
         self._avatar_port_var = tk.StringVar(value="9001")
         tk.Label(
             avt_frame, text="9001", bg=t.get("bg_panel", "#1a1a2e"),
-            fg=t.get("accent_orange", "#ffb74d"),
-            font=("Consolas", 9), width=6, anchor="w",
+            fg=t.get("text_secondary", "#b0b0b0"),
+            font=("Microsoft YaHei UI", 9),
         ).pack(side="left", padx=(4, 0))
 
         # Mode selection (A/B)
@@ -135,7 +135,7 @@ class OSCPanel(tk.Frame):
             activebackground=t.get("bg_button_danger_hover", "#6a2a2a"),
             activeforeground=t.get("text_primary", "#ffffff"),
             font=("Microsoft YaHei UI", 9), relief="flat",
-            cursor="hand2", command=self._on_disconnect_click, width=8,
+            cursor="hand2", command=self._on_disconnect_click,
             state="disabled",
         )
         self._disconnect_btn.pack(side="left")
