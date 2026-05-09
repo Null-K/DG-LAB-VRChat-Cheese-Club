@@ -130,7 +130,7 @@ class OSCPanel(tk.Frame):
         self._connect_btn.pack(side="left", padx=(0, 4))
 
         self._disconnect_btn = tk.Button(
-            btn_frame, text="断开", bg=t.get("bg_button_danger", "#4a1a1a"),
+            btn_frame, text="关闭Chatbox", bg=t.get("bg_button_danger", "#4a1a1a"),
             fg=t.get("text_primary", "#e0e0e0"),
             activebackground=t.get("bg_button_danger_hover", "#6a2a2a"),
             activeforeground=t.get("text_primary", "#ffffff"),

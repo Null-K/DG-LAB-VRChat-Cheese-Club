@@ -80,7 +80,19 @@ class App:
             self._window.osc_panel._connected = True
             self._window.osc_panel._status_label.configure(text="连接中...")
             self._window.osc_panel._draw_dot(self._window.osc_panel._theme.get("accent_orange", "#ffb74d"))
-            self.on_osc_toggle(True)
+            chatbox_port = self._window.osc_panel.get_chatbox_port()
+            from pythonosc import udp_client
+            try:
+                self._osc_client = udp_client.SimpleUDPClient("127.0.0.1", chatbox_port)
+                self._chatbox_running = True
+                self._log_to_console(f"Chatbox 已连接 (端口:{chatbox_port})", "info")
+            except Exception as e:
+                self._log_to_console(f"Chatbox启动失败: {e}", "error")
+            self._start_avatar(self._window.osc_panel.get_avatar_port(),
+                              self._window.osc_panel.get_mode_a(),
+                              self._window.osc_panel.get_mode_b())
+            self._send_chatbox_status()
+            self._window.osc_panel.set_status("connected")
         self._window.after(1000, _start_osc_auto)
 
     def _start_log_monitor(self):
@@ -311,12 +323,12 @@ class App:
                 data.get("a_strength", 0), data.get("b_strength", 0)
             ))
 
-    # --- VRChat OSC (merged: chatbox + avatar) ---
+    # --- VRChat OSC ---
     def on_osc_toggle(self, connected: bool):
         if connected:
             self._start_osc()
         else:
-            self._stop_osc()
+            self._stop_chatbox()
 
     def _start_osc(self):
         chatbox_port = self._window.osc_panel.get_chatbox_port()
@@ -326,7 +338,7 @@ class App:
 
         from pythonosc import udp_client
 
-        # 1. Chatbox client (send to VRChat) - always create first
+        # 1. Chatbox client (send to VRChat)
         try:
             self._osc_client = udp_client.SimpleUDPClient("127.0.0.1", chatbox_port)
             self._chatbox_running = True
@@ -334,7 +346,14 @@ class App:
         except Exception as e:
             self._log_to_console(f"Chatbox启动失败: {e}", "error")
 
-        # 2. Avatar OSC server (receive from VRChat)
+        # 2. Avatar OSC server (receive from VRChat) - always start, never stopped by user
+        self._start_avatar(avatar_port, mode_a, mode_b)
+
+        self._send_chatbox_status()
+
+    def _start_avatar(self, avatar_port, mode_a, mode_b):
+        if self._avatar_manager is not None:
+            return  # already running
         try:
             from pythonosc import dispatcher, osc_server
             d = dispatcher.Dispatcher()
@@ -383,30 +402,11 @@ class App:
         except Exception as e:
             self._log_to_console(f"Avatar OSC启动失败: {e}", "error")
 
-        self._send_chatbox_status()
-        self._window.after(0, lambda: self._window.osc_panel.set_status("connected"))
-
-    def _stop_osc(self):
+    def _stop_chatbox(self):
         self._chatbox_running = False
         if self._osc_client:
             self._osc_client = None
-        if self._osc_server:
-            try:
-                self._osc_server.shutdown()
-            except Exception:
-                pass
-            try:
-                self._osc_server.server_close()
-            except Exception:
-                pass
-            self._osc_server = None
-        self._stop_avatar()
-        self._log_to_console("VRChat OSC 已断开", "info")
-
-    def _stop_avatar(self):
-        if self._avatar_manager:
-            self._avatar_manager.stop()
-            self._avatar_manager = None
+        self._log_to_console("Chatbox 已断开", "info")
 
     def _send_chatbox(self, text: str):
         if not self._osc_client:
