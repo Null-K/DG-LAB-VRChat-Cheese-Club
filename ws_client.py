@@ -9,6 +9,8 @@ from typing import Callable, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
+import websockets  # noqa: E402  — imported at module level for PyInstaller
+
 
 def _get_local_ip() -> str:
     """Get the LAN IP address that phones can reach."""
@@ -86,12 +88,6 @@ class WSClient:
         self._loop.run_until_complete(self._server_main())
 
     async def _server_main(self):
-        try:
-            import websockets
-        except ImportError:
-            self._on_message({"type": "error", "text": "未安装websockets库"})
-            return
-
         async def handler(ws):
             await self._handle_client(ws)
 
