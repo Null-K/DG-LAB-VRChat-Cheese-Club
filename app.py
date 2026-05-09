@@ -203,6 +203,10 @@ class App:
                 self._window.settings_panel.get_custom_waveform()
                 if self._feeder_wf_mode == "custom" else ""
             )
+            try:
+                self._window.waveform_panel.set_active(True)
+            except Exception:
+                pass
             threading.Thread(target=self._waveform_feeder_thread, daemon=True).start()
 
     def _waveform_feeder_thread(self):
@@ -212,6 +216,10 @@ class App:
             remaining = self._shock_end_time - now
             if remaining <= 0 or not self._ws_client or not self._ws_client.is_paired:
                 self._waveform_feeder_running = False
+                try:
+                    self._window.after(0, lambda: self._window.waveform_panel.set_active(False))
+                except Exception:
+                    pass
                 break
             chunk_sec = 1
             a_wave, b_wave, _, _ = generate_ab_waveforms(
@@ -489,10 +497,18 @@ class App:
     def _on_avatar_wave(self, channel: str, wave_hex):
         if self._ws_client and self._ws_client.is_paired:
             self._ws_client.send_waveform(channel, wave_hex)
+            try:
+                self._window.waveform_panel.set_active(True)
+            except Exception:
+                pass
 
     def _on_avatar_clear(self, channel: str):
         if self._ws_client and self._ws_client.is_paired:
             self._ws_client.clear_waveform(channel)
+            try:
+                self._window.waveform_panel.set_active(False)
+            except Exception:
+                pass
 
     def _on_chatbox_enabled(self, enabled: bool):
         self._settings.set("chatbox_enabled", enabled)
