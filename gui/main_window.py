@@ -233,6 +233,9 @@ class MainWindow:
             self._root.destroy()
         except Exception:
             pass
+        # Force-kill process — tkinter may leave dangling Tcl/Tk refs
+        import sys as _sys
+        _sys.exit(0)
 
     def destroy(self):
         self._root.destroy()

@@ -20,24 +20,23 @@ logger = logging.getLogger(__name__)
 
 def _flat_waveform_entry(intensity: int) -> str:
     """Generate V3 8-byte hex: 4 carrier bytes + 4 pulse bytes.
+    Carrier 0x0A matches original Shocking-VRChat shock mode feel.
     UI intensity 0-200 maps to hex pulse 0-100 (0x00-0x64)."""
     i = max(MIN_INTENSITY, min(MAX_INTENSITY, intensity)) // 2  # 0-200 → 0-100 hex
     i = max(0, min(100, i))
-    # Moderate carrier (0x32 = 50) for a balanced sensation
-    return f"32323232{i:02X}{i:02X}{i:02X}{i:02X}"
+    return f"0A0A0A0A{i:02X}{i:02X}{i:02X}{i:02X}"
 
 
 def _ramp_waveform(seconds: int, target_intensity: int) -> list:
-    """Generate ramp waveform — carrier and pulse both rise linearly."""
+    """Generate ramp waveform — carrier fixed 0x0A (original Shocking-VRChat feel),
+    pulse rises linearly from 0 to target intensity."""
     count = seconds * 10
     entries = []
     for i in range(count):
         t = i / max(count - 1, 1)
         ui_val = max(MIN_INTENSITY, min(MAX_INTENSITY, int(target_intensity * t)))
         hex_pulse = max(0, min(100, ui_val // 2))
-        # Carrier ramps from 10 to 60 alongside pulse
-        carrier = int(10 + 50 * t)
-        entries.append(f"{carrier:02X}{carrier:02X}{carrier:02X}{carrier:02X}{hex_pulse:02X}{hex_pulse:02X}{hex_pulse:02X}{hex_pulse:02X}")
+        entries.append(f"0A0A0A0A{hex_pulse:02X}{hex_pulse:02X}{hex_pulse:02X}{hex_pulse:02X}")
     return entries
 
 
@@ -216,7 +215,7 @@ class App:
             on_shock_event=self._on_shock_event,
             on_log_line=self._on_log_line,
             log_dir=log_dir,
-            poll_interval=self._settings.get("poll_interval", 0.5),
+            poll_interval=self._settings.get("poll_interval", 0.2),
             idle_check_interval=self._settings.get("idle_check_interval", 5),
         )
         self._log_monitor.start()
@@ -324,6 +323,10 @@ class App:
                 "shock",
             )
             return
+
+        # Clear any avatar-queued waveforms so map events always take priority
+        self._ws_client.clear_waveform("A")
+        self._ws_client.clear_waveform("B")
 
         ui_mode = ui.get('mode', 'instant')
         wf_mode = ui.get('wf_mode', 'library')
@@ -834,8 +837,10 @@ class App:
             self._window.after(0, lambda p=params, pan=panel: pan.update_params(p))
 
     def _on_avatar_wave(self, channel: str, wave_hex):
+        # Don't overwrite map-triggered waveform with avatar events
+        if self._waveform_feeder_running:
+            return
         if self._ws_client and self._ws_client.is_paired:
-            # Send to both channels on device
             self._ws_client.send_waveform("A", wave_hex)
             self._ws_client.send_waveform("B", wave_hex)
             try:
@@ -855,6 +860,9 @@ class App:
                 pass
 
     def _on_avatar_clear(self, channel: str):
+        # Don't clear map-triggered waveform with avatar events
+        if self._waveform_feeder_running:
+            return
         if self._ws_client and self._ws_client.is_paired:
             self._ws_client.clear_waveform(channel)
             try:

@@ -30,11 +30,34 @@ logging.basicConfig(
 )
 
 
+def _kill_old_instances():
+    """Kill any already-running instances of this EXE (avoid accumulating orphans)."""
+    import subprocess, re
+    exe = re.escape("芝士郊狼控制软件")
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq 芝士郊狼控制软件*.exe", "/FO", "CSV"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().split("\n")[1:]:
+            pid_match = re.search(r'"(\d+)"', line)
+            if pid_match:
+                pid = pid_match.group(1)
+                subprocess.run(["taskkill", "/F", "/PID", pid],
+                             capture_output=True, timeout=3)
+    except Exception:
+        pass
+
+
 def main():
+    _kill_old_instances()
     try:
         from app import App
         app = App()
         app.run()
+    except SystemExit:
+        raise  # Let sys.exit() pass through
+
     except ImportError as e:
         print(f"缺少依赖库: {e}")
         print("请运行: pip install -r requirements.txt")

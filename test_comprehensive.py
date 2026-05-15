@@ -29,7 +29,7 @@ def test_flat_waveform_entry():
         assert len(entry) == 16, f"Length wrong for {i}: {len(entry)}"
         carrier = int(entry[0:2], 16)
         pulse = int(entry[8:10], 16)
-        assert carrier == 0x32, f"Carrier wrong: {carrier}"  # moderate sensation
+        assert carrier == 0x0A, f"Carrier wrong: {carrier}"  # matches original Shocking-VRChat
         assert pulse == i // 2, f"Pulse wrong for {i}: {pulse}"  # 0-200 UI → 0-100 hex
     print("PASS: flat_waveform_entry (0-200)")
 
