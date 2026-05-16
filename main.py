@@ -33,7 +33,7 @@ logging.basicConfig(
 def _kill_old_instances():
     """Kill any already-running instances of this EXE (avoid accumulating orphans)."""
     import subprocess, re
-    exe = re.escape("芝士郊狼控制软件")
+    my_pid = str(os.getpid())
     try:
         result = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq 芝士郊狼控制软件*.exe", "/FO", "CSV"],
@@ -43,6 +43,8 @@ def _kill_old_instances():
             pid_match = re.search(r'"(\d+)"', line)
             if pid_match:
                 pid = pid_match.group(1)
+                if pid == my_pid:
+                    continue  # 补药自杀
                 subprocess.run(["taskkill", "/F", "/PID", pid],
                              capture_output=True, timeout=3)
     except Exception:

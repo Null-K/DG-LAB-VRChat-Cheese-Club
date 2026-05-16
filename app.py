@@ -91,6 +91,7 @@ class App:
         self._log_file = None
         self._last_log_time = {}  # Rate-limiting for console log messages
         self._last_log_cleanup = 0  # Last time we cleaned up _last_log_time
+        self._last_log_time_max = 200
         self._last_http_shock_time = 0
         self._http_server = HttpServer(port=self._settings.get("http_port", 8800))
 
@@ -128,6 +129,8 @@ class App:
                 result['wf_mode'] = p.get_waveform_mode()
                 result['custom_wf'] = p.get_custom_waveform()
                 result['alternate'] = p.get_alternate_waveform()
+                result['safety_mode'] = p.get_safety_mode()
+                result['safety_max'] = p.get_safety_max_seconds()
             except Exception:
                 pass
             done.set()
@@ -140,7 +143,8 @@ class App:
         if not result:
             result = {'a_limit': 0, 'b_limit': 0, 'dual_ch': False,
                       'max_mode': False, 'mode': 'instant', 'wf_mode': 'random',
-                      'custom_wf': '', 'alternate': False}
+                      'custom_wf': '', 'alternate': False,
+                      'safety_mode': True, 'safety_max': 15}
         return result
 
     def run(self):
@@ -227,10 +231,22 @@ class App:
         )
         self._log_monitor.start()
 
-    def _apply_safety_limits(self, seconds: float, recent_events: list, log_warning: bool = True) -> tuple[float, bool]:
-        """Apply safety limits. Returns (adjusted_seconds, should_continue)."""
+    def _get_safety_max_total(self) -> int:
+        """启用时使用 UI 设置的安全模式总时长上限，否则使用 SAFETY_MAX_TOTAL"""
+        try:
+            p = self._window.settings_panel
+            if p.get_safety_mode():
+                return p.get_safety_max_seconds()
+        except Exception:
+            pass
+        return SAFETY_MAX_TOTAL
+
+    def _apply_safety_limits(self, seconds: float, recent_events: list, log_warning: bool = True, safety_max: int = None) -> tuple[float, bool]:
+        """应用安全限制"""
         if seconds <= 0:
             return 0, False
+        if safety_max is None:
+            safety_max = self._get_safety_max_total()
         import time as _time
         with self._safety_lock:
             now = _time.time()
@@ -252,18 +268,18 @@ class App:
                 # Allow at least 1 second to keep shock running
                 seconds = 1
                 if log_warning:
-                    self._log_to_console(f"安全限制: 窗口内累计超限，限制为1秒", "warning")
+                    self._log_to_console(f"安全限制: 窗口内累计超限，限制为 1 秒", "warning")
 
-            # Total cap — ensure total remaining never exceeds SAFETY_MAX_TOTAL
+            # Total cap — use safety mode setting if enabled
             if now < self._shock_end_time:
                 current_remaining = self._shock_end_time - now
             else:
                 current_remaining = 0
 
-            if current_remaining + seconds > SAFETY_MAX_TOTAL:
-                seconds = max(1, SAFETY_MAX_TOTAL - current_remaining)  # Allow at least 1 second
+            if current_remaining + seconds > safety_max:
+                seconds = max(1, safety_max - current_remaining)  # Allow at least 1 second
                 if log_warning:
-                    self._log_to_console(f"安全限制: 总时长已达{SAFETY_MAX_TOTAL}秒上限，限制为{seconds}秒", "warning")
+                    self._log_to_console(f"安全限制: 总时长已达 {safety_max} 秒上限，限制为 {seconds} 秒", "warning")
 
             # Update remaining time — use current_remaining, not old accumulated value
             new_remaining = current_remaining + seconds
@@ -339,7 +355,8 @@ class App:
         wf_mode = ui.get('wf_mode', 'library')
 
         # Apply safety limits — do NOT extend shock_end_time, let current shock finish naturally
-        seconds, should_continue = self._apply_safety_limits(seconds, self._shock_recent_events_log)
+        safety_max = ui.get('safety_max', 15) if ui.get('safety_mode', True) else SAFETY_MAX_TOTAL
+        seconds, should_continue = self._apply_safety_limits(seconds, self._shock_recent_events_log, safety_max=safety_max)
         if not should_continue:
             if self._waveform_feeder_running:
                 self._log_to_console(f"安全限制: 已达上限，当前电击继续但不延长时间", "warning")
@@ -450,12 +467,8 @@ class App:
         _cached_b_wave = None
         _cached_a_subs = None
         _cached_b_subs = None
+        _render_counter = 0
         while self._waveform_feeder_running and self._feeder_generation == generation:
-            # Ensure panel stays active while feeder is running
-            try:
-                self._window.after(0, lambda: self._window.waveform_panel.set_active(True))
-            except Exception:
-                pass
             now = _time.time()
             remaining = self._shock_end_time - now
             if remaining <= 0 or not self._ws_client or not self._ws_client.is_paired:
@@ -489,27 +502,28 @@ class App:
                     b_wave = generate_smooth_feeder_waveform(self._feeder_b_limit, 10)
             self._ws_client.send_waveform("A", a_wave, duration=chunk_sec)
             self._ws_client.send_waveform("B", b_wave, duration=chunk_sec)
-            # Decode hex waveform into intensity sub-frames and push to panel
-            # Use cache when waveform data hasn't changed
-            try:
-                if a_wave != _cached_a_wave:
-                    _cached_a_wave = a_wave
-                    _cached_a_subs = _decode_wave_hex(a_wave)
-                if b_wave != _cached_b_wave:
-                    _cached_b_wave = b_wave
-                    _cached_b_subs = _decode_wave_hex(b_wave)
-                a_subs, b_subs = _cached_a_subs, _cached_b_subs
-                self._window.after(0, lambda a=a_subs, b=b_subs, t=now:
-                    self._window.waveform_panel.push_waveform(a, b, t))
-            except Exception:
-                pass
-            # Update stats on main thread
-            stats = (self._stats_a_seconds, self._stats_b_seconds,
-                     self._stats_a_intensity_time, self._stats_b_intensity_time)
-            try:
-                self._window.after(0, lambda s=stats: self._window.settings_panel.update_stats(*s))
-            except Exception:
-                pass
+            # Push display updates only every 4th iteration (~2s) to reduce GC pressure
+            _render_counter += 1
+            if _render_counter % 4 == 1:
+                try:
+                    if a_wave != _cached_a_wave:
+                        _cached_a_wave = a_wave
+                        _cached_a_subs = _decode_wave_hex(a_wave)
+                    if b_wave != _cached_b_wave:
+                        _cached_b_wave = b_wave
+                        _cached_b_subs = _decode_wave_hex(b_wave)
+                    a_subs, b_subs = _cached_a_subs, _cached_b_subs
+                    self._window.after(0, lambda a=a_subs, b=b_subs, t=now:
+                        self._window.waveform_panel.push_waveform(a, b, t))
+                except Exception:
+                    pass
+                # 更新主线程上的统计数据
+                stats = (self._stats_a_seconds, self._stats_b_seconds,
+                         self._stats_a_intensity_time, self._stats_b_intensity_time)
+                try:
+                    self._window.after(0, lambda s=stats: self._window.settings_panel.update_stats(*s))
+                except Exception:
+                    pass
             # Hard stop after max runtime — stop feeding, let device play out its queue naturally
             if _time.time() - _start_time > _max_runtime:
                 self._waveform_feeder_running = False
@@ -558,9 +572,11 @@ class App:
         import time as _time
         now = _time.time()
         key = f"{tag}:{text[:50]}"
-        # Clean up old entries periodically (every 30s)
-        if now - self._last_log_cleanup > 30 and len(self._last_log_time) > 50:
-            cutoff = now - 60
+        # Clean up old entries when dict exceeds cap or every 30s
+        if len(self._last_log_time) > self._last_log_time_max or (
+            now - self._last_log_cleanup > 30 and len(self._last_log_time) > 50
+        ):
+            cutoff = now - 10
             self._last_log_time = {k: v for k, v in self._last_log_time.items() if v > cutoff}
             self._last_log_cleanup = now
         last_time = self._last_log_time.get(key, 0)
@@ -629,11 +645,24 @@ class App:
         self._log_to_console(f"启动WebSocket服务: {_get_local_ip()}:{port}", "info")
 
     def on_disconnect(self):
-        if self._ws_client:
-            self._ws_client.disconnect()
-            self._ws_client = None
+        ws = self._ws_client
+        self._ws_client = None
         self._stop_waveform_monitor()
-        self._log_to_console("服务已停止", "warning")
+        self._waveform_feeder_running = False
+        self._log_to_console("正在断开...", "warning")
+        if ws:
+            # 异步执行断开操作
+            import threading
+            def _bg_disconnect():
+                try:
+                    ws.disconnect()
+                except Exception:
+                    pass
+                if self._window:
+                    self._window.after(0, lambda: self._log_to_console("服务已停止", "warning"))
+            threading.Thread(target=_bg_disconnect, daemon=True).start()
+        else:
+            self._log_to_console("服务已停止", "warning")
 
     def _start_waveform_monitor(self):
         if self._ws_client:
@@ -935,8 +964,10 @@ class App:
         if self._waveform_feeder_running and now < self._shock_end_time:
             current_remaining = self._shock_end_time - now
             new_remaining = current_remaining + seconds
-            if new_remaining > SAFETY_MAX_TOTAL:
-                new_remaining = SAFETY_MAX_TOTAL
+
+            safety_cap = self._get_safety_max_total()
+            if new_remaining > safety_cap:
+                new_remaining = safety_cap
             self._shock_end_time = now + new_remaining
             self._log_to_console(f"延长电击: +{seconds}秒 (剩余{int(self._shock_end_time - now)}秒)", "info")
             return
@@ -961,7 +992,8 @@ class App:
             b_limit = a_limit
 
         # Apply safety limits
-        seconds, should_continue = self._apply_safety_limits(seconds, self._shock_recent_events_http, log_warning=False)
+        safety_max = ui.get('safety_max', 15) if ui.get('safety_mode', True) else SAFETY_MAX_TOTAL
+        seconds, should_continue = self._apply_safety_limits(seconds, self._shock_recent_events_http, log_warning=False, safety_max=safety_max)
         if not should_continue:
             return
 
@@ -1043,6 +1075,8 @@ class App:
         self._window.settings_panel.set_custom_chatbox(s.get("custom_chatbox", ""))
         self._window.settings_panel.set_chatbox_toggles(s.get("chatbox_toggles", {}))
         self._window.settings_panel.set_theme_button_text(self._current_theme_name)
+        self._window.settings_panel.set_safety_mode(s.get("safety_mode", True))
+        self._window.settings_panel.set_safety_max_seconds(s.get("safety_max_seconds", 15))
 
     def _save_settings_from_ui(self):
         s = self._settings
@@ -1063,6 +1097,8 @@ class App:
         s.set("chatbox_enabled", self._window.settings_panel.get_chatbox_enabled())
         s.set("custom_chatbox", self._window.settings_panel.get_custom_chatbox())
         s.set("chatbox_toggles", self._window.settings_panel.get_chatbox_toggles())
+        s.set("safety_mode", self._window.settings_panel.get_safety_mode())
+        s.set("safety_max_seconds", self._window.settings_panel.get_safety_max_seconds())
         s.save()
 
     def _save_session_stats(self):
@@ -1150,6 +1186,16 @@ class App:
                 self._save_session_stats()
             except Exception:
                 pass
+            # 退出时释放 matplotlib 资源以防止内存泄漏
+            try:
+                import matplotlib.pyplot as plt
+                plt.close('all')
+            except Exception:
+                pass
+            # 清理大型数据结构
+            self._last_log_time.clear()
+            self._shock_recent_events_log.clear()
+            self._shock_recent_events_http.clear()
             log.info("cleanup done")
         except Exception as e:
             log.error(f"cleanup error: {e}")

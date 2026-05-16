@@ -371,6 +371,75 @@ class SettingsPanel(tk.Frame):
         )
         self._stats_b_label.pack(anchor="w")
 
+        # 安全模式
+        safety_container = tk.Frame(self, bg=t.get("bg_card", "#151d2b"),
+                                    highlightbackground=t.get("border_color", "#1e293b"),
+                                    highlightthickness=1)
+        safety_container.pack(fill="x", padx=4, pady=(8, 4))
+        self._safety_container = safety_container
+
+        # 标题
+        safety_header = tk.Frame(safety_container, bg=t.get("bg_card", "#151d2b"))
+        safety_header.pack(fill="x", padx=12, pady=(12, 8))
+
+        tk.Label(
+            safety_header, text="安全模式",
+            bg=t.get("bg_card", "#151d2b"),
+            fg=t.get("text_primary", "#f1f5f9"),
+            font=(UI_M_B), anchor="w",
+        ).pack(side="left")
+
+        # 安全模式开关
+        self._safety_mode_var = tk.BooleanVar(value=True)
+        self._safety_toggle = tk.Checkbutton(
+            safety_header, text="启用", variable=self._safety_mode_var,
+            bg=t.get("bg_card", "#151d2b"),
+            fg=t.get("accent_emerald", "#34d399"),
+            selectcolor=t.get("bg_input", "#0f1520"),
+            activebackground=t.get("bg_card", "#151d2b"),
+            activeforeground=t.get("text_primary", "#f1f5f9"),
+            font=(UI_S_B), relief="flat",
+            command=self._on_change,
+        )
+        self._safety_toggle.pack(side="right")
+
+        tk.Label(
+            safety_container, text="限制累计电击时间的最高上限",
+            bg=t.get("bg_card", "#151d2b"),
+            fg=t.get("text_muted", "#475569"),
+            font=(UI_XS), anchor="w",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+        # 滑块
+        dur_frame = tk.Frame(safety_container, bg=t.get("bg_card", "#151d2b"))
+        dur_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+        tk.Label(
+            dur_frame, text="最大累计时长",
+            bg=t.get("bg_card", "#151d2b"),
+            fg=t.get("text_dim", "#64748b"),
+            font=(UI_S),
+        ).pack(side="left")
+
+        self._safety_max_var = tk.IntVar(value=15)
+        self._safety_max_label = tk.Label(
+            dur_frame, text="15秒",
+            bg=t.get("bg_card", "#151d2b"),
+            fg=t.get("accent_orange", "#ffb74d"),
+            font=(MONO_M_B), width=5,
+        )
+        self._safety_max_label.pack(side="right")
+
+        self._safety_max_scale = tk.Scale(
+            dur_frame, from_=5, to=60, orient="horizontal",
+            variable=self._safety_max_var, command=self._on_safety_max_change,
+            bg=t.get("bg_card", "#151d2b"),
+            fg=t.get("text_secondary", "#94a3b8"),
+            troughcolor=t.get("bg_slider_trough", "#1e293b"),
+            highlightthickness=0, sliderrelief="flat", length=140,
+        )
+        self._safety_max_scale.pack(side="right", padx=(8, 8))
+
     def _on_dual_toggle(self):
         dual = self._dual_var.get()
         state = "disabled" if dual else "normal"
@@ -380,6 +449,10 @@ class SettingsPanel(tk.Frame):
 
     def _on_wf_mode_change(self):
         self._update_custom_wf_visibility()
+        self._on_change()
+
+    def _on_safety_max_change(self, value):
+        self._safety_max_label.configure(text=f"{int(float(value))}秒")
         self._on_change()
 
     def _update_custom_wf_visibility(self):
@@ -495,6 +568,20 @@ class SettingsPanel(tk.Frame):
 
     def get_chatbox_toggles(self) -> dict:
         return {k: v.get() for k, v in self._chatbox_toggles.items()}
+
+    # 安全模式相关方法
+    def get_safety_mode(self) -> bool:
+        return self._safety_mode_var.get()
+
+    def set_safety_mode(self, enabled: bool):
+        self._safety_mode_var.set(enabled)
+
+    def get_safety_max_seconds(self) -> int:
+        return self._safety_max_var.get()
+
+    def set_safety_max_seconds(self, value: int):
+        self._safety_max_var.set(value)
+        self._safety_max_label.configure(text=f"{value}秒")
 
     def update_stats(self, a_seconds, b_seconds, a_intensity_time, b_intensity_time):
         self._stats_a_label.configure(

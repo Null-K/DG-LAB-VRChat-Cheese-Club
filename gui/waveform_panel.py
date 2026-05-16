@@ -31,6 +31,7 @@ class WaveformPanel(tk.Frame):
         self._lock = threading.Lock()
         self._push_max_pending = 50  # cap pending buffer to prevent unbounded growth
         self._last_render_time = 0  # throttle renders to every 200ms
+        self._stopped = False  # 调用 stop() 后为 True
 
         # Current intensity values for display
         self._current_a = 0
@@ -156,7 +157,19 @@ class WaveformPanel(tk.Frame):
         self._active = True
 
     def stop(self):
+        """暂停（但不清除数据，允许 resume）"""
         self._active = False
+
+    def shutdown(self):
+        """永久停止循环（在窗口关闭时调用）"""
+        self._active = False
+        self._stopped = True
+        if self._tick_id is not None:
+            try:
+                self.after_cancel(self._tick_id)
+            except Exception:
+                pass
+            self._tick_id = None
 
     def set_active(self, active: bool):
         self._active = active
@@ -198,6 +211,8 @@ class WaveformPanel(tk.Frame):
                 self._history.append((ts, a_val, b_val))
 
     def _tick(self):
+        if self._stopped:
+            return
         self._flush_push()
         now = time.time()
         # Render at most every 200ms to keep chart scrolling smoothly
