@@ -205,8 +205,8 @@ class MainWindow:
             self._shutdown_event.set()
             # Stop app first (sets flags, stops timers)
             self._app.on_close()
-            # Stop waveform panel tick
-            self.waveform_panel.stop()
+            # Permanently stop waveform panel tick loop
+            self.waveform_panel.shutdown()
             # Cancel all pending after() callbacks
             for after_id in list(self._after_ids):
                 try:
@@ -236,9 +236,9 @@ class MainWindow:
             self._root.destroy()
         except Exception:
             pass
-        # Force-kill process — tkinter may leave dangling Tcl/Tk refs
-        import sys as _sys
-        _sys.exit(0)
+        # 强制终止此进程，以确保不留下孤立进程
+        import os as _os
+        _os._exit(0)
 
     def destroy(self):
         self._root.destroy()
