@@ -83,21 +83,71 @@ class WSClient:
         self._strength_max = {"A": 200, "B": 200}
         self._waveform_active = False  # Suppress reactive strength correction during waveform playback
         self._server_socket = None
+        self._ws_server = None
+        self._stop_event: Optional[asyncio.Event] = None
         self._init_task: Optional[asyncio.Task] = None  # track init strength task for cancellation
 
     def _run_server(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+
+        # Custom exception handler: suppress expected errors during shutdown
+        _default_handler = self._loop.get_exception_handler()
+
+        def _shutdown_exception_handler(loop, context):
+            # During shutdown, suppress all asyncio errors (IOCP abort, closed loop, etc.)
+            if not self._running:
+                return
+            exc = context.get("exception")
+            if isinstance(exc, OSError) and getattr(exc, "winerror", None) == 995:
+                return  # Suppress IOCP abort
+            if _default_handler:
+                _default_handler(loop, context)
+            else:
+                loop.default_exception_handler(context)
+
+        self._loop.set_exception_handler(_shutdown_exception_handler)
+
         try:
             self._loop.run_until_complete(self._server_main())
+        except RuntimeError as e:
+            # "Event loop stopped before Future completed" is expected during shutdown
+            if "Event loop stopped" not in str(e):
+                logger.error(f"服务器线程异常: {e}")
         finally:
-            # Close all remaining tasks
-            for task in asyncio.all_tasks(self._loop):
-                task.cancel()
+            # Give websockets internal tasks time to finish naturally.
+            # websockets uses asyncio.shield() internally so cancellation
+            # doesn't propagate — we must let them complete on their own.
+            try:
+                self._loop.run_until_complete(asyncio.sleep(0.1))
+            except Exception:
+                pass
+            # Cancel any remaining tasks (IOCP etc.)
+            try:
+                pending = asyncio.all_tasks(self._loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    self._loop.run_until_complete(asyncio.sleep(0.1))
+            except Exception:
+                pass
+            try:
+                self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            # Suppress "Task was destroyed but it is pending" errors on close.
+            # These are harmless — break message was already sent successfully.
+            # websockets' shielded tasks can't be cancelled and will be GC'd.
+            _asyncio_logger = logging.getLogger("asyncio")
+            _prev_level = _asyncio_logger.level
+            _asyncio_logger.setLevel(logging.CRITICAL)
             self._loop.close()
+            _asyncio_logger.setLevel(_prev_level)
             self._loop = None
 
     async def _server_main(self):
+        self._stop_event = asyncio.Event()
+
         async def handler(ws):
             await self._handle_client(ws)
 
@@ -122,13 +172,27 @@ class WSClient:
             self._on_message({"type": "info", "text": f"服务器已启动: {local_ip}:{self._port}"})
             self._on_message({"type": "info", "text": f"终端ID: {self._local_client_id[:16]}.."})
 
-            async with websockets.serve(
+            self._ws_server = await websockets.serve(
                 handler, sock=sock,
                 ping_interval=None,
                 compression=None,
                 server_header=None,
-            ):
-                await asyncio.Future()
+                close_timeout=2,
+            )
+            try:
+                await self._stop_event.wait()
+            finally:
+                self._ws_server.close()
+                await self._ws_server.wait_closed()
+        except asyncio.CancelledError:
+            pass
+        except OSError as e:
+            # WinError 995: I/O operation aborted during shutdown - expected
+            if e.winerror == 995:
+                pass
+            else:
+                self._on_message({"type": "error", "text": f"服务器启动失败: {e}"})
+                self._on_status("disconnected")
         except Exception as e:
             self._on_message({"type": "error", "text": f"服务器启动失败: {e}"})
             self._on_status("disconnected")
@@ -228,9 +292,17 @@ class WSClient:
 
                 elif msg_type == "heartbeat":
                     self._on_message({"type": "debug", "text": "收到心跳"})
+                elif msg_type == "break":
+                    # DG-LAB App is requesting disconnect
+                    self._on_message({"type": "info", "text": "APP请求断开连接"})
+                    # Close the WebSocket connection so the app can complete its disconnect
+                    await ws.close()
+                    break
                 else:
                     self._on_message({"type": "debug", "text": f"未知消息类型: {msg_type} data={str(msg_data)[:80]}"})
 
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             self._on_message({"type": "warning", "text": f"连接异常: {e}"})
         finally:
@@ -316,36 +388,59 @@ class WSClient:
 
     def disconnect(self):
         self._running = False
-        # Close the server socket to release the port immediately
-        if self._server_socket:
+        # First, reset strength to 0 so device stops output before we disconnect
+        if self._loop and self._loop.is_running() and self._app_target_id:
             try:
-                self._server_socket.close()
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._send_to_app("msg", "strength-1+2+0"), self._loop
+                )
+                fut.result(timeout=1)
+                fut = asyncio.run_coroutine_threadsafe(
+                    self._send_to_app("msg", "strength-2+2+0"), self._loop
+                )
+                fut.result(timeout=1)
             except Exception as e:
-                logger.debug(f"关闭server socket异常: {e}")
-            self._server_socket = None
-        # Send close frames to all WebSocket connections BEFORE stopping loop
+                logger.debug(f"归零强度异常: {e}")
+            # Send protocol-level "break" message so DG-LAB App knows we disconnected
+            try:
+                with self._lock:
+                    target = self._app_target_id
+                break_msg = _make_msg("break", client_id=self._local_client_id,
+                                      target_id=target or "", message="209")
+                # Send directly to the ws object since _send_to_app uses "msg" type
+                with self._lock:
+                    ws = self._uuid_to_ws.get(target) if target else None
+                if ws:
+                    fut = asyncio.run_coroutine_threadsafe(ws.send(break_msg), self._loop)
+                    fut.result(timeout=1)
+            except Exception as e:
+                logger.debug(f"发送break消息异常: {e}")
+        # Clear internal state
         with self._lock:
-            targets = list(self._uuid_to_ws.values())
             self._uuid_to_ws.clear()
             self._bound = False
             self._app_target_id = None
             self._app_uuid_in_bind = None
-        if self._loop and self._loop.is_running():
-            for ws in targets:
-                try:
-                    fut = asyncio.run_coroutine_threadsafe(ws.close(), self._loop)
-                    fut.result(timeout=2)
-                except Exception as e:
-                    logger.debug(f"关闭websocket异常: {e}")
-        # Stop the event loop
-        if self._loop:
+        # Signal the server to stop gracefully
+        # _ws_server.close() + wait_closed() will properly close all client connections
+        # (sends close frames and waits for handshake completion)
+        if self._loop and self._loop.is_running() and self._stop_event:
             try:
-                self._loop.call_soon_threadsafe(self._loop.stop)
+                self._loop.call_soon_threadsafe(self._stop_event.set)
             except Exception:
                 pass
         if self._thread:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                # Thread didn't exit gracefully, force stop the loop
+                if self._loop:
+                    try:
+                        self._loop.call_soon_threadsafe(self._loop.stop)
+                    except Exception:
+                        pass
+                    self._thread.join(timeout=1)
             self._thread = None
+        self._server_socket = None
         self._on_status("disconnected")
 
     @property
@@ -363,9 +458,12 @@ class WSClient:
         ch_num = "1" if channel.upper() == "A" else "2"
         value = max(0, min(200, value))
         if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self._send_to_app("msg", f"strength-{ch_num}+2+{value}"), self._loop
-            )
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_to_app("msg", f"strength-{ch_num}+2+{value}"), self._loop
+                )
+            except RuntimeError:
+                pass
 
     def force_strength(self, a_limit: int, b_limit: int):
         """Immediately force both channels to their limits."""
@@ -376,19 +474,21 @@ class WSClient:
             a_val = min(a_limit, self._strength_max.get("A", 200))
             b_val = min(b_limit, self._strength_max.get("B", 200))
         if self._loop and self._loop.is_running():
-            asyncio.run_coroutine_threadsafe(
-                self._send_to_app("msg", f"strength-1+2+{a_val}"), self._loop
-            )
-            asyncio.run_coroutine_threadsafe(
-                self._send_to_app("msg", f"strength-2+2+{b_val}"), self._loop
-            )
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_to_app("msg", f"strength-1+2+{a_val}"), self._loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self._send_to_app("msg", f"strength-2+2+{b_val}"), self._loop
+                )
+            except RuntimeError:
+                pass
 
     def send_waveform(self, channel: str, hex_data, duration: int = 5):
         """Send waveform data to device. No clear needed - device replaces queue automatically."""
         if not self.is_paired:
             self._on_message({"type": "warning", "text": f"send_waveform 跳过: 未配对"})
             return
-        self._waveform_active = True
         if isinstance(hex_data, list):
             pass  # already a list
         elif isinstance(hex_data, str):
@@ -403,6 +503,7 @@ class WSClient:
         if not isinstance(hex_data, list) or not hex_data:
             self._on_message({"type": "warning", "text": f"send_waveform 跳过: 数据为空 type={type(hex_data)}"})
             return
+        self._waveform_active = True
         ch_name = channel.upper()  # pulse uses letters: A, B
         # pydglab_ws limit: max 86 entries per message, max 1950 chars
         CHUNK_SIZE = 86

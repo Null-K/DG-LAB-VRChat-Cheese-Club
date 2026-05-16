@@ -26,17 +26,19 @@ class WaveformPanel(tk.Frame):
         self._history = collections.deque(maxlen=600)  # 15s @ 25ms per sample
         self._visible_seconds = 12
         self._tick_id = None
-        self._tick_stopped = False
         self._active = False
         self._push_pending = []  # thread-safe push buffer
         self._lock = threading.Lock()
         self._push_max_pending = 50  # cap pending buffer to prevent unbounded growth
+        self._last_render_time = 0  # throttle renders to every 200ms
 
         # Current intensity values for display
         self._current_a = 0
         self._current_b = 0
 
         self._build()
+        # Start tick loop immediately — it's lightweight when idle
+        self._tick()
 
     def _build(self):
         t = self._theme
@@ -102,7 +104,7 @@ class WaveformPanel(tk.Frame):
         ).pack(side="left", padx=(2, 0))
 
         # Matplotlib figure with two subplots
-        self._fig = Figure(figsize=(8, 5), dpi=60, facecolor=t.get("waveform_bg", "#0a0a1a"))
+        self._fig = Figure(figsize=(6, 3.5), dpi=80, facecolor=t.get("waveform_bg", "#0a0a1a"))
 
         # Create two subplots stacked vertically
         self._ax_a = self._fig.add_subplot(211)
@@ -136,10 +138,6 @@ class WaveformPanel(tk.Frame):
         self._line_b, = self._ax_b.plot([], [], color=t.get("accent_orange", "#ffb74d"),
                                         linewidth=1.5, alpha=0.9)
 
-        # Fill objects (removed - fill_between was causing memory growth)
-        self._fill_a = None
-        self._fill_b = None
-
         self._fig.tight_layout(pad=1.0)
 
         self._canvas = FigureCanvasTkAgg(self._fig, master=self)
@@ -155,23 +153,13 @@ class WaveformPanel(tk.Frame):
 
     def start(self, get_a_value, get_b_value):
         self._history.clear()
-        self._tick_stopped = False
-        if self._tick_id:
-            self.after_cancel(self._tick_id)
-        self._tick()
+        self._active = True
 
     def stop(self):
-        self._tick_stopped = True
-        if self._tick_id:
-            self.after_cancel(self._tick_id)
-            self._tick_id = None
         self._active = False
 
     def set_active(self, active: bool):
         self._active = active
-        if active and self._tick_stopped:
-            self._tick_stopped = False
-            self._tick()
 
     def set_intensity(self, a: int, b: int):
         """Set actual intensity values for display (called from main thread)."""
@@ -193,13 +181,15 @@ class WaveformPanel(tk.Frame):
         with self._lock:
             pending = self._push_pending[:]
             self._push_pending.clear()
-        # Cap history to prevent unbounded growth
-        while len(self._history) > self._history.maxlen * 2:
-            trim = len(self._history) - self._history.maxlen
-            for _ in range(trim):
-                self._history.popleft()
+        if not pending:
+            return
         dt = self.SUB_INTERVAL
         for a_ints, b_ints, base_time in pending:
+            # Ensure new data starts after existing data (no overlap)
+            if self._history:
+                last_ts = self._history[-1][0]
+                if base_time <= last_ts:
+                    base_time = last_ts + dt
             max_len = max(len(a_ints), len(b_ints))
             for i in range(max_len):
                 ts = base_time + i * dt
@@ -208,17 +198,15 @@ class WaveformPanel(tk.Frame):
                 self._history.append((ts, a_val, b_val))
 
     def _tick(self):
-        if self._tick_stopped:
-            return
-        # When inactive, only run very lightweight info updates at 1s interval
-        if not self._active:
-            self._update_info()
-            self._tick_id = self.after(1000, self._tick)
-            return
         self._flush_push()
         now = time.time()
-        if self._history:
-            self._render(now)
+        # Render at most every 200ms to keep chart scrolling smoothly
+        if self._history and (now - self._last_render_time >= 0.2):
+            try:
+                self._render(now)
+                self._last_render_time = now
+            except Exception:
+                pass
         self._update_info(now)
         self._tick_id = self.after(100, self._tick)
 
@@ -232,21 +220,17 @@ class WaveformPanel(tk.Frame):
 
         xs_a, ys_a = [], []
         xs_b, ys_b = [], []
-        entries = list(self._history)
 
-        for i, (ts, a_val, b_val) in enumerate(entries):
+        # Only iterate visible entries (skip old data without copying full list)
+        for entry in self._history:
+            ts, a_val, b_val = entry
             if ts < x_min - 0.05:
                 continue
             x = ts - x_min
-            if i + 1 < len(entries):
-                x_end = entries[i + 1][0] - x_min
-            else:
-                x_end = x + 0.025
-
-            xs_a.extend([x, x_end])
-            ys_a.extend([a_val, a_val])
-            xs_b.extend([x, x_end])
-            ys_b.extend([b_val, b_val])
+            xs_a.append(x)
+            ys_a.append(a_val)
+            xs_b.append(x)
+            ys_b.append(b_val)
 
         # Update channel A
         self._line_a.set_data(xs_a, ys_a)
@@ -313,7 +297,6 @@ class WaveformPanel(tk.Frame):
         )
 
     def clear(self):
-        self.stop()
         self._history.clear()
         with self._lock:
             self._push_pending.clear()
@@ -322,12 +305,6 @@ class WaveformPanel(tk.Frame):
         self._current_b = 0
         self._line_a.set_data([], [])
         self._line_b.set_data([], [])
-        if self._fill_a is not None:
-            self._fill_a.remove()
-            self._fill_a = None
-        if self._fill_b is not None:
-            self._fill_b.remove()
-            self._fill_b = None
         self._ax_a.set_xlim(0, self._visible_seconds)
         self._ax_b.set_xlim(0, self._visible_seconds)
         self._canvas.draw_idle()
