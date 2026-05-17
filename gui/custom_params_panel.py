@@ -377,7 +377,7 @@ class CustomParamsPanel(ctk.CTkFrame):
         path_text = f"[{rule['channel']}] {rule['path']}"
         ctk.CTkLabel(
             card, text=path_text, text_color=ch_color,
-            font=ctk.CTkFont(family="Cascadia Code", size=14)
+            font=ctk.CTkFont(family="Cascadia Code", size=12)
         ).grid(row=0, column=1, padx=4, pady=(8, 0), sticky="w")
 
         # 条件（第二行）
@@ -387,7 +387,7 @@ class CustomParamsPanel(ctk.CTkFrame):
         )
         ctk.CTkLabel(
             card, text=cond_text, text_color="#71717a",
-            font=ctk.CTkFont(family="MiSans", size=14)
+            font=ctk.CTkFont(family="MiSans", size=12)
         ).grid(row=1, column=1, padx=4, pady=(0, 8), sticky="w")
 
         # 编辑按钮
