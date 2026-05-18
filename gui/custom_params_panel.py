@@ -12,6 +12,9 @@ class CustomParamsPanel(ctk.CTkFrame):
     CHANNEL_OPTIONS = ["A", "B", "AB"]
     TYPE_OPTIONS = ["bool", "int", "float"]
     OPERATOR_OPTIONS = ["==", "!=", ">", "<", ">=", "<="]
+    MODE_OPTIONS = ["距离", "电击", "触感"]
+    _MODE_TO_INTERNAL = {"距离": "distance", "电击": "shock", "触感": "touch"}
+    _INTERNAL_TO_MODE = {"distance": "距离", "shock": "电击", "touch": "触感"}
 
     def __init__(self, master, theme=None, on_rules_change=None, **kwargs):
         kwargs.setdefault("fg_color", "#1a1a1a")
@@ -123,10 +126,37 @@ class CustomParamsPanel(ctk.CTkFrame):
         self._form_channel.set("A")
         self._form_channel.grid(row=1, column=1, padx=(4, 12), pady=4, sticky="ew")
 
+        # 模式
+        ctk.CTkLabel(f, text="模式:", text_color="#a1a1aa",
+                     font=ctk.CTkFont(family="MiSans", size=15)).grid(
+            row=2, column=0, padx=(12, 4), pady=4, sticky="w")
+        self._form_mode = ctk.CTkSegmentedButton(
+            f, values=self.MODE_OPTIONS, font=ctk.CTkFont(family="MiSans", size=14),
+            selected_color="#d4a054", selected_hover_color="#b8893e",
+            unselected_color="#161616", unselected_hover_color="#333333",
+            text_color="#e4e4e7", command=self._on_mode_change
+        )
+        self._form_mode.set("电击")
+        self._form_mode.grid(row=2, column=1, padx=(4, 12), pady=4, sticky="ew")
+
+        # 模式说明
+        self._MODE_DESCRIPTIONS = {
+            "距离": "持续输出 — 强度随参数值线性变化，值越大强度越高",
+            "电击": "瞬时触发 — 条件满足时立即发送一次固定时长的电击",
+            "触感": "速度感应 — 根据参数变化速度输出，变化越快强度越高",
+        }
+        self._mode_desc_label = ctk.CTkLabel(
+            f, text=self._MODE_DESCRIPTIONS["电击"],
+            text_color="#52525b", font=ctk.CTkFont(family="MiSans", size=12),
+            anchor="w"
+        )
+        self._mode_desc_label.grid(row=3, column=0, columnspan=2, padx=(12, 12),
+                                   pady=(0, 4), sticky="ew")
+
         # 类型
         ctk.CTkLabel(f, text="类型:", text_color="#a1a1aa",
                      font=ctk.CTkFont(family="MiSans", size=15)).grid(
-            row=2, column=0, padx=(12, 4), pady=4, sticky="w")
+            row=4, column=0, padx=(12, 4), pady=4, sticky="w")
         self._form_type = ctk.CTkSegmentedButton(
             f, values=self.TYPE_OPTIONS, font=ctk.CTkFont(family="MiSans", size=14),
             selected_color="#d4a054", selected_hover_color="#b8893e",
@@ -134,11 +164,11 @@ class CustomParamsPanel(ctk.CTkFrame):
             text_color="#e4e4e7", command=self._on_type_change
         )
         self._form_type.set("bool")
-        self._form_type.grid(row=2, column=1, padx=(4, 12), pady=4, sticky="ew")
+        self._form_type.grid(row=4, column=1, padx=(4, 12), pady=4, sticky="ew")
 
         # 条件（运算符 + 值）— 用于 int/float
         self._cond_frame = ctk.CTkFrame(f, fg_color="transparent")
-        self._cond_frame.grid(row=3, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
+        self._cond_frame.grid(row=5, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
         self._cond_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(self._cond_frame, text="条件:", text_color="#a1a1aa",
@@ -165,7 +195,7 @@ class CustomParamsPanel(ctk.CTkFrame):
 
         # Bool 值选择 — 用于 bool 类型
         self._bool_frame = ctk.CTkFrame(f, fg_color="transparent")
-        self._bool_frame.grid(row=3, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
+        self._bool_frame.grid(row=5, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
 
         ctk.CTkLabel(self._bool_frame, text="触发值:", text_color="#a1a1aa",
                      font=ctk.CTkFont(family="MiSans", size=15)).pack(side="left", padx=(0, 8))
@@ -186,18 +216,18 @@ class CustomParamsPanel(ctk.CTkFrame):
         # 时长
         ctk.CTkLabel(f, text="时长(ms):", text_color="#a1a1aa",
                      font=ctk.CTkFont(family="MiSans", size=15)).grid(
-            row=4, column=0, padx=(12, 4), pady=4, sticky="w")
+            row=6, column=0, padx=(12, 4), pady=4, sticky="w")
         self._form_duration = ctk.CTkEntry(
             f, width=100, fg_color="#161616",
             border_color="#333333", text_color="#e4e4e7",
             placeholder_text="1000"
         )
         self._form_duration.insert(0, "1000")
-        self._form_duration.grid(row=4, column=1, padx=(4, 12), pady=4, sticky="w")
+        self._form_duration.grid(row=6, column=1, padx=(4, 12), pady=4, sticky="w")
 
         # 表单按钮
         form_btn_frame = ctk.CTkFrame(f, fg_color="transparent")
-        form_btn_frame.grid(row=5, column=0, columnspan=2, padx=12, pady=(4, 10), sticky="ew")
+        form_btn_frame.grid(row=7, column=0, columnspan=2, padx=12, pady=(4, 10), sticky="ew")
         form_btn_frame.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkButton(
@@ -215,14 +245,19 @@ class CustomParamsPanel(ctk.CTkFrame):
         ).grid(row=0, column=1, padx=(4, 0), sticky="ew")
 
     # --- 表单控制 ---
+    def _on_mode_change(self, selected_mode: str):
+        """切换模式时更新说明文字。"""
+        desc = self._MODE_DESCRIPTIONS.get(selected_mode, "")
+        self._mode_desc_label.configure(text=desc)
+
     def _on_type_change(self, selected_type: str):
         """切换类型时显示/隐藏对应的值输入控件。"""
         if selected_type == "bool":
             self._cond_frame.grid_remove()
-            self._bool_frame.grid(row=3, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
+            self._bool_frame.grid(row=5, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
         else:
             self._bool_frame.grid_remove()
-            self._cond_frame.grid(row=3, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
+            self._cond_frame.grid(row=5, column=0, columnspan=2, padx=12, pady=4, sticky="ew")
 
     def _show_form(self):
         self._editing_index = None
@@ -233,6 +268,7 @@ class CustomParamsPanel(ctk.CTkFrame):
         self._form_type.set("bool")
         self._on_type_change("bool")
         self._form_channel.set("A")
+        self._form_mode.set("电击")
         self._form_bool_var.set("true")
         self._form_operator.set("==")
         self._form_frame.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 8))
@@ -280,6 +316,7 @@ class CustomParamsPanel(ctk.CTkFrame):
         rule = {
             "path": path,
             "channel": self._form_channel.get(),
+            "mode": self._MODE_TO_INTERNAL.get(self._form_mode.get(), "shock"),
             "type": rule_type,
             "value": value,
             "operator": self._form_operator.get(),
@@ -322,6 +359,10 @@ class CustomParamsPanel(ctk.CTkFrame):
             self._form_path.insert(0, path)
 
         self._form_channel.set(rule.get("channel", "A"))
+
+        # 模式
+        rule_mode = rule.get("mode", "shock")
+        self._form_mode.set(self._INTERNAL_TO_MODE.get(rule_mode, "电击"))
 
         rule_type = rule.get("type", "bool")
         self._form_type.set(rule_type)
@@ -381,9 +422,10 @@ class CustomParamsPanel(ctk.CTkFrame):
         ).grid(row=0, column=1, padx=4, pady=(8, 0), sticky="w")
 
         # 条件（第二行）
+        mode_label = self._INTERNAL_TO_MODE.get(rule.get("mode", "shock"), "电击")
         cond_text = (
             f"{rule['type']} {rule['operator']} {rule['value']}  "
-            f"| {rule['duration']}ms"
+            f"| {mode_label} | {rule['duration']}ms"
         )
         ctk.CTkLabel(
             card, text=cond_text, text_color="#71717a",
@@ -475,6 +517,7 @@ class CustomParamsPanel(ctk.CTkFrame):
                 valid_rules.append({
                     "path": str(r.get("path", "")),
                     "channel": str(r.get("channel", "A")),
+                    "mode": str(r.get("mode", "shock")),
                     "type": str(r.get("type", "bool")),
                     "value": r.get("value", True),
                     "operator": str(r.get("operator", "==")),

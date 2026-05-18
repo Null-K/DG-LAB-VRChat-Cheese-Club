@@ -144,7 +144,7 @@ class OSCPanel(ctk.CTkFrame):
 
         self._params_label = ctk.CTkLabel(
             params_frame, text="暂无数据", text_color="#71717a",
-            font=ctk.CTkFont(family="Cascadia Code", size=15),
+            font=ctk.CTkFont(family="Cascadia Code", size=12),
             justify="left", anchor="w", width=280,
         )
         self._params_label.grid(row=1, column=0, padx=12, pady=(0, 8), sticky="w")

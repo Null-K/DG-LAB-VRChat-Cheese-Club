@@ -356,6 +356,14 @@ class App:
         ui_mode = ui.get('mode', 'instant')
         wf_mode = ui.get('wf_mode', 'library')
 
+        # 自定义规则可覆盖模式
+        avatar_mode = event.get("avatar_mode")
+        if avatar_mode == "distance":
+            ui_mode = "gradual"  # 距离模式使用渐进波形
+        elif avatar_mode == "touch":
+            ui_mode = "instant"  # 触感模式使用瞬发波形
+        # avatar_mode == "shock" 保持 ui_mode 不变（默认 instant）
+
         # Apply safety limits — do NOT extend shock_end_time, let current shock finish naturally
         safety_max = ui.get('safety_max', 15) if ui.get('safety_mode', True) else SAFETY_MAX_TOTAL
         seconds, should_continue = self._apply_safety_limits(seconds, self._shock_recent_events_log, safety_max=safety_max)
@@ -802,11 +810,15 @@ class App:
         self._custom_rule_cooldowns[path] = now + duration_sec + 1
 
         channel = rule.get("channel", "A")
+        rule_mode = rule.get("mode", "shock")
+        mode_labels = {"distance": "距离", "shock": "电击", "touch": "触感"}
+        mode_label = mode_labels.get(rule_mode, "电击")
         self._log_to_console(
-            f"[参数联动] 触发: {path} → 通道{channel} {duration_sec}秒",
+            f"[参数联动] 触发: {path} → 通道{channel} {mode_label} {duration_sec}秒",
             "shock",
         )
-        event = {"mode": "instant", "seconds": duration_sec, "hand": channel}
+        event = {"mode": "instant", "seconds": duration_sec, "hand": channel,
+                 "avatar_mode": rule_mode}
         self._on_shock_event(event)
 
     # --- VRChat OSC ---

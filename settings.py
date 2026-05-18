@@ -63,8 +63,8 @@ DEFAULT_SETTINGS = {
         },
     },
     # 自定义参数联动规则
-    # 每条规则: {"path": str, "channel": "A"|"B"|"AB", "type": "bool"|"int"|"float",
-    #            "value": any, "enabled": bool, "duration": int}
+    # 每条规则: {"path": str, "channel": "A"|"B"|"AB", "mode": "distance"|"shock"|"touch",
+    #            "type": "bool"|"int"|"float", "value": any, "enabled": bool, "duration": int}
     "custom_osc_rules": [],
 }
 
