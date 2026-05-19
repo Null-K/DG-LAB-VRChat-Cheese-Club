@@ -21,6 +21,7 @@ DEFAULT_SETTINGS = {
     "custom_waveform": "",
     "chatbox_toggles": {"line1": True, "line2": True, "line3": True, "line4": True, "line5": True},
     "http_port": 8800,
+    "qr_ip_override": "",
     # Avatar OSC settings (compatible with Shocking-VRChat)
     "avatar_osc_port": 9001,
     "avatar_osc_host": "127.0.0.1",

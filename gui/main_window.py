@@ -97,7 +97,9 @@ class MainWindow:
 
         self.connection_panel = ConnectionPanel(tab1, theme=self._theme,
                                                on_connect=self._app.on_connect,
-                                               on_disconnect=self._app.on_disconnect)
+                                               on_disconnect=self._app.on_disconnect,
+                                               on_ip_change=self._app.on_qr_ip_change,
+                                               on_refresh_ips=self._app.get_qr_ip_candidates)
         self.connection_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=0)
 
         self.settings_panel = SettingsPanel(tab1, theme=self._theme,

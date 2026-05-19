@@ -94,6 +94,7 @@ class App:
         self._last_log_time_max = 200
         self._last_http_shock_time = 0
         self._http_server = HttpServer(port=self._settings.get("http_port", 8800))
+        self._current_qr_url = ""
         self._custom_osc_rules = self._settings.get("custom_osc_rules", [])
         self._custom_rule_cooldowns = {}  # path -> last trigger time (debounce)
 
@@ -638,6 +639,7 @@ class App:
     # --- Connection (server mode) ---
     def on_connect(self):
         port = self._window.connection_panel.get_port()
+        selected_ip = self._window.connection_panel.get_selected_ip()
         self._ws_client = WSClient(
             port=port,
             on_status_change=self._on_ws_status,
@@ -646,10 +648,12 @@ class App:
             on_strength_update=self._on_strength_update,
             on_get_a_limit=lambda: self._window.settings_panel.get_a_limit(),
             on_get_b_limit=lambda: self._window.settings_panel.get_b_limit(),
+            display_ip=selected_ip,
         )
         self._ws_client.connect(host="0.0.0.0", port=port)
         from ws_client import _get_local_ip
-        self._log_to_console(f"启动WebSocket服务: {_get_local_ip()}:{port}", "info")
+        display_ip = selected_ip or _get_local_ip()
+        self._log_to_console(f"启动WebSocket服务: {display_ip}:{port}", "info")
 
     def on_disconnect(self):
         ws = self._ws_client
@@ -705,10 +709,34 @@ class App:
                     self._shock_recent_events_log.clear()
                     self._shock_recent_events_http.clear()
 
+    def _replace_qr_url_ip(self, url: str, ip: str) -> str:
+        if not url or not ip:
+            return url
+        import re
+        return re.sub(r"(ws://)([^:/#]+)(:\\d+/)", rf"\g<1>{ip}\g<3>", url, count=1)
+
+    def get_qr_ip_candidates(self):
+        from ws_client import get_local_ip_candidates
+        return get_local_ip_candidates()
+
+    def on_qr_ip_change(self, ip: str):
+        self._settings.set("qr_ip_override", ip)
+        self._settings.save()
+        if not self._current_qr_url or not self._window:
+            return
+        url = self._replace_qr_url_ip(self._current_qr_url, ip)
+        client_id = self._ws_client.client_id if self._ws_client else ""
+        self._window.connection_panel.set_qr(url, client_id)
+        if ip:
+            self._log_to_console(f"扫码 IP 已切换为: {ip}", "info")
+
     def _on_qr_url(self, url: str):
+        self._current_qr_url = url
         if self._window:
+            selected_ip = self._window.connection_panel.get_selected_ip()
+            display_url = self._replace_qr_url_ip(url, selected_ip) if selected_ip else url
             self._window.after(0, lambda: self._window.connection_panel.set_qr(
-                url, self._ws_client.client_id if self._ws_client else ""
+                display_url, self._ws_client.client_id if self._ws_client else ""
             ))
 
     def _on_ws_message(self, msg: dict):
@@ -1168,6 +1196,8 @@ class App:
     def _load_settings_to_ui(self):
         s = self._settings
         self._window.connection_panel.set_port(s.get("port", 9999))
+        ips = self.get_qr_ip_candidates()
+        self._window.connection_panel.set_ip_options(ips, s.get("qr_ip_override", ""))
         self._window.settings_panel.set_a_limit(s.get("a_limit", 200))
         self._window.settings_panel.set_b_limit(s.get("b_limit", 200))
         self._window.settings_panel.set_mode(s.get("mode", "instant"))
@@ -1193,6 +1223,7 @@ class App:
     def _save_settings_from_ui(self):
         s = self._settings
         s.set("port", self._window.connection_panel.get_port())
+        s.set("qr_ip_override", self._window.connection_panel.get_selected_ip())
         s.set("a_limit", self._window.settings_panel.get_a_limit())
         s.set("b_limit", self._window.settings_panel.get_b_limit())
         s.set("mode", self._window.settings_panel.get_mode())

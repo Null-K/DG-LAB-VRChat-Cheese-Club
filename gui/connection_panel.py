@@ -7,18 +7,23 @@ import os
 class ConnectionPanel(ctk.CTkFrame):
     QR_SIZE = 220
 
-    def __init__(self, master, theme=None, on_connect=None, on_disconnect=None, **kwargs):
+    def __init__(self, master, theme=None, on_connect=None, on_disconnect=None,
+                 on_ip_change=None, on_refresh_ips=None, **kwargs):
         kwargs.pop("bg", None)
         super().__init__(master, fg_color="#1a1a1a", corner_radius=8, **kwargs)
         self._theme = theme or {}
         self._on_connect = on_connect or (lambda: None)
         self._on_disconnect = on_disconnect or (lambda: None)
+        self._on_ip_change = on_ip_change or (lambda ip: None)
+        self._on_refresh_ips = on_refresh_ips or (lambda: [])
         self._qr_image = None
         self._qr_path = None
         self._qr_original = None
         self._qr_overlay = None
         self._qr_enlarged = False
         self._qr_full_image = None
+        self._ip_var = ctk.StringVar(value="")
+        self._ip_options = []
         self._build()
 
     def _build(self):
@@ -83,6 +88,25 @@ class ConnectionPanel(ctk.CTkFrame):
                                     text="启动服务后显示", fill="#71717a",
                                     font=("Segoe UI", 11))
 
+        ip_frame = ctk.CTkFrame(card, fg_color="transparent")
+        ip_frame.pack(fill="x", padx=16, pady=(0, 8))
+        ctk.CTkLabel(ip_frame, text="IP 列表", font=ctk.CTkFont(family="MiSans Normal", size=14),
+                     text_color="#71717a").pack(side="left", padx=(0, 8))
+        self._ip_menu = ctk.CTkOptionMenu(
+            ip_frame, values=["自动"], variable=self._ip_var, width=150, height=30,
+            fg_color="#161616", button_color="#333333", button_hover_color="#444444",
+            dropdown_fg_color="#242424", dropdown_hover_color="#333333",
+            text_color="#e4e4e7", font=ctk.CTkFont(family="MiSans Normal", size=14),
+            dropdown_font=ctk.CTkFont(family="MiSans Normal", size=14),
+            command=self._on_ip_selected)
+        self._ip_menu.pack(side="left", fill="x", expand=True)
+        self._refresh_ip_btn = ctk.CTkButton(
+            ip_frame, text="刷新", width=54, height=30, corner_radius=6,
+            fg_color="#3f3f46", hover_color="#52525b",
+            font=ctk.CTkFont(family="MiSans Normal", size=14),
+            command=self.refresh_ip_options)
+        self._refresh_ip_btn.pack(side="left", padx=(8, 0))
+
         self._zoom_btn = ctk.CTkButton(card, text="放大二维码", width=100, height=28,
                                        corner_radius=6, fg_color="#d4a054",
                                        hover_color="#b8893e", font=ctk.CTkFont(family="MiSans Normal", size=15),
@@ -106,6 +130,36 @@ class ConnectionPanel(ctk.CTkFrame):
         self._on_disconnect()
 
     # === Public API ===
+
+    def _on_ip_selected(self, value: str):
+        ip = value.strip()
+        if ip == "自动":
+            ip = ""
+        self._on_ip_change(ip)
+
+    def refresh_ip_options(self):
+        selected = self.get_selected_ip()
+        ips = self._on_refresh_ips() or []
+        self.set_ip_options(ips, selected_ip=selected)
+
+    def set_ip_options(self, ips, selected_ip: str = ""):
+        unique_ips = []
+        for ip in ips:
+            if ip and ip not in unique_ips:
+                unique_ips.append(ip)
+        self._ip_options = unique_ips
+        values = unique_ips or ["自动"]
+        self._ip_menu.configure(values=values)
+        if selected_ip and selected_ip in unique_ips:
+            self._ip_var.set(selected_ip)
+        elif unique_ips:
+            self._ip_var.set(unique_ips[0])
+        else:
+            self._ip_var.set("自动")
+
+    def get_selected_ip(self) -> str:
+        ip = self._ip_var.get().strip()
+        return "" if ip == "自动" else ip
 
     def set_status(self, status: str):
         status_map = {
